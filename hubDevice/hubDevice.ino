@@ -11,7 +11,7 @@
 #define SS      15
 #define RST     16
 #define DI0     4
-#define BAND    921000000
+// #define BAND    921000000
 #define PABOOST true 
 #define SW    5
 #define LED   LED_BUILTIN
@@ -23,6 +23,8 @@ unsigned long timeref=0; // timestamp updated by server
 int lightCnt=0;
 int sigcnt=0;
 long timethreshold=60000;
+unsigned long band=921000000;
+int syncword=0x12;
 
 FS* FileSystem = &LittleFS;
 LittleFSConfig fileSystemConfig = LittleFSConfig();
@@ -120,7 +122,7 @@ void handleList() {
 
   while (dir.next()) { // first file only
     if(dir.fileName().endsWith(".dat")) {
-      flist+=dir.fileName();
+      flist+="\""+dir.fileName()+"\"";
       fsize+=String(dir.fileSize());
       break;
     }
@@ -128,7 +130,7 @@ void handleList() {
   
   while (dir.next()) {
     if(dir.fileName().endsWith(".dat")) {
-      flist+=","+dir.fileName();
+      flist+=",\""+dir.fileName()+"\"";
       fsize+=","+String(dir.fileSize());
     }
   }
@@ -176,6 +178,20 @@ void handleSet() {
   String resp="set command for ";
   resp+=String(nodecm)+": "+cmdstr;
   server.send(200,"text/plain", resp); 
+}
+
+void handleInfo() {
+  String resp="Suarabumi LoRa Concentrator\n";
+  resp+="(c) 2022, rosandi\nDept. Geophysics, Unpad\n\n";
+  resp+="System: ESP8266+SX1276\n";
+  resp+="DevName: "+host+"\n";
+  resp+="mac/IP: ";
+  resp+=WiFi.macAddress();
+  resp+="/"+WiFi.softAPIP().toString()+"\n";
+  resp+="Band: "+String(band)+"\n";
+  resp+="SyncWord: 0x"+String(syncword,HEX)+"\n";
+  resp+="Location: "+String(lon)+","+String(lat)+"\n";
+  server.send(200, "text/plain", resp);  
 }
 
 void handleNotFound() {
@@ -263,9 +279,11 @@ void setupWiFi() {
     Serial.println("Configuration access point...");
     ssid=DEVSSID;
     password=DEVPWD;
+    WiFi.mode(WIFI_AP);
     WiFi.softAP(ssid,password);
     IPAddress myIP = WiFi.softAPIP();
-    Serial.print("AP IP address: ");
+    Serial.print("AP address: ");
+    Serial.print(WiFi.macAddress()+"/");
     Serial.println(myIP);
     Serial.println("Waiting for config request");
     
@@ -281,6 +299,7 @@ void setupWiFi() {
     server.on("/list",handleList);
     server.on("/dump",handleDump);
     server.on("/set",handleSet);
+    server.on("/info",handleInfo);
     server.onNotFound(handleNotFound); // fetch data by default
      
   } else {
@@ -291,14 +310,24 @@ void setupWiFi() {
     Serial.printf("Connecting to %s\n", ssid);
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
+    int wcnt=0;
     
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
       Serial.print(".");
+      wcnt++;
+
+      if(wcnt>100) {
+        onConfig=true;
+        setupWiFi();
+        return;
+      }
+      
     }
     
     Serial.println("");
-    Serial.print(F("Connected! IP address: "));
+    Serial.print("Connected to "+ssid+" address:");
+    Serial.print(WiFi.macAddress()+"/");
     Serial.println(WiFi.localIP());
     
     client.setInsecure();
@@ -331,11 +360,12 @@ void checkFactoryReset()  {
 
 void setupLoRa() {
   LoRa.setPins(SS,RST,DI0);
-  if (!LoRa.begin(BAND)) {
+  if (!LoRa.begin(band)) {
     Serial.println("Starting LoRa failed!");
     while (true);
   }
-  else LoRa.setTxPower(17,PABOOST);
+  LoRa.setSyncWord(syncword);
+  LoRa.setTxPower(17,PABOOST);
   Serial.println("LoRa initiated. Waiting for message...");
 }
 
