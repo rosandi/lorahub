@@ -470,7 +470,9 @@ void getData() {
 }
 
 void sendData() {
-  String srvreq="key="+apikey+"&dev="+devid+"&node="+String(nodeid)+"&data="+data;
+  String srvreq="key="+apikey+"&dev="+devid+"&node="+String(nodeid);
+  srvreq+="&pos="+String(lon)+","+String(lat)+"&data="+data;
+  
   Serial.println(srvreq);
   HTTPClient http;
   if(http.begin(client, dataserv)) {
