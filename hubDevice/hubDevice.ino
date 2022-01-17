@@ -435,7 +435,7 @@ void getData() {
       }
       
       if(bitstream) {
-        data+=String(dd)+",";
+        data+=String((uint8_t)dd)+",";
       } else {
         data+=checkChar(dd);
       }
