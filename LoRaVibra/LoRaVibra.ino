@@ -29,11 +29,7 @@ uint16_t DLY=480;
 
 bool data_avail=false;
 int sendcnt=0;
-#define NDATA 128
-#define log2N 7
 
-int16_t val[NDATA];
-int16_t valmax=-1;
 uint16_t gwid=0;
 
 int code;
@@ -61,8 +57,16 @@ lifesign(int n, int spd=1000) {
 #define PP 6.283185307179586
 #define PH 1.570796326794897
 
-#define q 8
-#define N (1<<q)
+#define log2N 8
+#define NDATA 128
+#define log2N 7
+#define AMAX 255
+
+int16_t val[NDATA];
+int16_t ival[NDATA];
+int16_t valmax=-1;
+int i,j,k,s,m,m2;
+struct {float re; float im;} w, wm, t, u;
 
 unsigned char sintab[NTAB] = 
 {0, 16, 31, 47, 63, 78,
@@ -75,10 +79,9 @@ unsigned char sintab[NTAB] =
  122, 108, 93, 78, 63, 47, 31, 16};
 
 float rsin(float x) {
-    float qu=1;
+    int qu=1;
     while (x>PP) x-=PP;
     while (x<0) x+=PP;
-    
     if(x>=PI) {x-=PI;qu=-1;}
 
     int xx=(int)(x/PP);
@@ -86,81 +89,64 @@ float rsin(float x) {
     x*=100.0/PP;
     xx=(int)x;
     float ofs=(x-(float)xx);
-    float a=(float)sintab[xx];
     float b=xx<(NTAB-1)?(float)sintab[xx+1]:(float)sintab[0];
-    a*=qu/255.0;
-    b*=qu/255.0;
-    a=a+(b-a)*ofs;
-    return a;
+    b=qu*(sintab[xx]+(b-sintab[xx])*ofs);
+    return b/AMAX;
 }
 
 float rcos(float x) {
     return rsin(x+PH);
 }
 
-float rsqrt(const float x) {
-  union
-  {
-    int32_t i;
-    float x;
-  } u;
-  u.x = x;
-  u.i = (1<<29) + (u.i >> 1) - (1<<22); 
-  u.x =       u.x + x/u.x;
-  u.x = 0.25f*u.x + x/u.x;
-  return u.x;
-}
-
-unsigned int bitReverse(unsigned int x, int log2n) {
-    int n = 0;
-    for (int i = 0; i < log2n; i++) {
-        n <<= 1;
-        n |= (x & 1);
-        x >>= 1;
-    }
-    return n;
-}
-
-void fft(int16_t a[], int log2n) {
-    int n = (1<<log2n); 
-    struct {float re; float im;} A[N], w, wm, t, u;
-
-    for (unsigned int i = 0; i < n; ++i) {
-        int rev=bitReverse(i, log2n);
-        A[i].re=(float) a[rev];
-        A[i].im=0;
+void fft() {
+    // bit reversal       
+    for (i = 0; i < NDATA; ++i) {
+        k=0;
+        s=i;       
+        for (j = 0; j < log2N; j++) {
+            k <<= 1;
+            k |= (s & 1);
+            s >>= 1;
+        }        
+        ival[i]=val[k];
     }
     
-    for (int s = 1; s <= log2n; ++s) {
-        int m = 1 << s; 
-        int m2 = m >> 1;
-        
+    for (i=0;i<NDATA;i++) {
+         val[i]=ival[i];
+        ival[i]=0;
+    }
+    
+    for (s = 1; s <= log2N; ++s) {
+        m = 1 << s; 
+        m2 = m >> 1;
         w.re=1;
         w.im=0;
+        
         wm.re=rcos(PI/m2);
         wm.im=-rsin(PI/m2);
 
-        for (int j = 0; j < m2; ++j) {
-            for (int k = j; k < n; k += m) {
-                t.re=w.re*A[k+m2].re - w.im*A[k+m2].im;
-                t.im=w.im*A[k+m2].re + w.re*A[k+m2].im;
-                u.re=A[k].re;
-                u.im=A[k].im;
-                A[k].re = u.re + t.re;
-                A[k].im = u.im + t.im;
-                A[k+m2].re = u.re - t.re;
-                A[k+m2].im = u.im - t.im;
+        for (j = 0; j < m2; ++j) {
+            for (k = j; k < NDATA; k += m) {
+                t.re=(w.re*val[k+m2] - w.im*ival[k+m2]);
+                t.im=(w.im*val[k+m2] + w.re*ival[k+m2]);
+                u.re=val[k];
+                u.im=ival[k];
+                 val[k] = (int16_t)(u.re + t.re);
+                ival[k] = (int16_t)(u.im + t.im);
+                 val[k+m2] = (int16_t)(u.re - t.re);
+                ival[k+m2] = (int16_t)(u.im - t.im);
             }
-            t.re=w.re*wm.re-w.im*wm.im;
-            t.im=w.im*wm.re+w.re*wm.im;
+            t.re=(w.re*wm.re-w.im*wm.im);
+            t.im=(w.im*wm.re+w.re*wm.im);
             w.re=t.re;
             w.im=t.im;
         }
     }
+    
     valmax=-1;
-    for (int i=0;i<n;i++) {
-        a[i]=(int16_t) rsqrt(A[i].re*A[i].re + A[i].im*A[i].im);
-        if(valmax<a[i]) valmax=a[i];
+    for (i=0;i<NDATA;i++) {
+        if(val[i]<0) val[i]=-val[i];
+        if(valmax<val[i]) valmax=val[i];
     }
 }
 
@@ -188,14 +174,14 @@ void acquireData() {
 
   ts=millis();
   
-  for(int i=0;i<NDATA;i++) {
+  for(i=0;i<NDATA;i++) {
     long d=0;
     for(ovr=0;ovr<OVERSMP;ovr++) 
       d+=signValue(analogReadDiff());
     val[i]=(int16_t)(d/OVERSMP);
   }
 
-  fft(val, log2N);
+  fft();
   
   ts=millis()-ts;
   data_avail=true;
