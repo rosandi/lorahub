@@ -148,6 +148,7 @@ void fft() {
     }
     
     valmax=-1;
+    val[0]=0; // remove dc offset
     for (i=0;i<NDATA;i++) {
         if(val[i]<0) val[i]=-val[i];
         if(valmax<val[i]) valmax=val[i];
@@ -263,12 +264,11 @@ void sendData() {
 Serial.println("Sending data");
 #endif
 
-  buff[0]=0x00;        // bitstream mark
-  buff[1]=NDATA/2;     // length;
-  ival[1]=valmax; // max value: buff[2],buff[3]
-  buff[4]=0x00;  // reserved for data integrity checking
-  buff[5]=0x00;
-  buff[6]=0x00;
+  buff[0]=0x00;          // bitstream mark
+  buff[1]=NDATA/2;       // length;
+  ival[1]=valmax;        // max value: buff[2],buff[3]
+  ival[2]=(uint16_t)ts;  // tsample:   buff[4],buff[5]
+  buff[6]=0x00;          // reserved
   buff[7]=0x00;
 
   for (int i=0; i<NDATA/2; i++) {
@@ -281,7 +281,7 @@ Serial.println("Sending data");
   LoRa.endPacket();
 
 #ifdef DEBUG
-  Serial.println("Sent: "+String(valmax)+":"+val[0]);
+  Serial.println("Sent: vmax="+String(valmax)+" tsample="+ts);
   for (int i=0;i<NDATA/2; i++) {
     Serial.println(bptr[i]);
   }
