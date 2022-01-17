@@ -37,7 +37,7 @@ unsigned long ts;
 
 // UBAH DEVICE ID!!!
 uint16_t device_id=101;
-
+String devid="<101>";
 uint16_t counter=0;
 uint16_t imul;
 
@@ -64,9 +64,13 @@ lifesign(int n, int spd=1000) {
 
 int16_t val[NDATA];
 int16_t ival[NDATA];
+// warning! reuse buffer
+int8_t *buff=(int8_t*)ival;
+uint8_t *bptr=buff+8;
+
 int16_t valmax=-1;
 int i,j,k,s,m,m2;
-struct {float re; float im;} w, wm, t, u;
+struct {float re; float im;} w, wm, t, u;  
 
 unsigned char sintab[NTAB] = 
 {0, 16, 31, 47, 63, 78,
@@ -252,34 +256,32 @@ uint8_t checkReceived() {
   return RECFAILED;
 }
 
-void sendData() {  
-  String msg="<"+String(device_id)+">";
-  
+void sendData() {    
   // [bin][len][maxlo][maxhi][chk][rsv*4][data...]
-  
-  uint8_t buff[8+NDATA/2];
-  uint8_t *bptr=buff+8;
-  
+
+#ifdef DEBUG
+Serial.println("Sending data");
+#endif
+
   buff[0]=0x00;        // bitstream mark
   buff[1]=NDATA/2;     // length;
-  buff[2]=(uint8_t)(valmax&0x00FF); // max value
-  buff[3]=(uint8_t)(valmax>>8);
+  ival[1]=valmax; // max value: buff[2],buff[3]
   buff[4]=0x00;  // reserved for data integrity checking
   buff[5]=0x00;
   buff[6]=0x00;
   buff[7]=0x00;
 
   for (int i=0; i<NDATA/2; i++) {
-    int32_t vv=255*(int32_t)val[i];
-    bptr[i]=(uint8_t)vv/valmax;
+    bptr[i]=(uint8_t)(255.0*(float)val[i]/(float)valmax);
   }
   
   LoRa.beginPacket();
-  LoRa.print(msg);
+  LoRa.print(devid);
   LoRa.write(buff,8+NDATA/2);
   LoRa.endPacket();
 
 #ifdef DEBUG
+  Serial.println("Sent: "+String(valmax)+":"+val[0]);
   for (int i=0;i<NDATA/2; i++) {
     Serial.println(bptr[i]);
   }
