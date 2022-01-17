@@ -19,7 +19,7 @@
 #define RECRETRY  0x0F
 #define RECIGNORE 0xFF
 
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 uint16_t DLY=10;

@@ -466,6 +466,7 @@ void getData() {
     Serial.println(nodeid);
     Serial.println(data);
     data_avail=true;
+    bitstream=false;
   }
 }
 

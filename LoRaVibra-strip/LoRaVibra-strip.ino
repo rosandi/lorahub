@@ -167,12 +167,12 @@ void acquireData() {
       d+=signValue(analogReadDiff());
     val[i]=(int16_t)(d/OVERSMP);
   }
+  ts=millis()-ts;
 
   fft();
-  lifesign(4,100);
-  ts=millis()-ts;
   data_avail=true;
   sendcnt=0;
+  lifesign(4,100);
 }
 
 uint8_t checkReceived() {
@@ -212,7 +212,7 @@ uint8_t checkReceived() {
   }
  
   if (stat=="ok") {
-    lifesign(2,200);
+    lifesign(8,50);
     return RECOK;
   }
   if (stat=="sleep") {
@@ -228,7 +228,8 @@ uint8_t checkReceived() {
   return RECFAILED;
 }
 
-void sendData() {    
+void sendData() {
+      
   // [bin][len][maxlo][maxhi][chk][rsv*4][data...]
 
   buff[0]=0x00;          // bitstream mark
@@ -247,6 +248,8 @@ void sendData() {
   LoRa.write(buff,8+NDATA/2);
   LoRa.endPacket();
 
+  lifesign(1,500);
+  
 /*
 #ifdef DEBUG
   Serial.println("Sent: vmax="+String(valmax)+" tsample="+ts);
@@ -255,7 +258,6 @@ void sendData() {
   }
 #endif;
 */
-
 }
 
 // ---- ARDUINO STANDARD ----
@@ -264,15 +266,6 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   lifesign(5,500);
   LoRa.setPins(SS,RST,DI0);
-
-  if (!LoRa.begin(BAND)) {
-    while (1) lifesign(10,100);
-  } else {
-    LoRa.setTxPower(17,PABOOST);
-    LoRa.setSyncWord(0x12);
-  }
-
-  lifesign(2,1000);
 }
 
 /*
@@ -291,18 +284,30 @@ void loop() {
 
   for (imul=0;imul<DLY;imul++) {      
     if(data_avail) {
+
+      if (!LoRa.begin(BAND)) {
+        while (1) lifesign(10,100);
+      } else {
+        LoRa.setTxPower(17,PABOOST);
+        LoRa.setSyncWord(0x12);
+      }
+      
       sendcnt++;
       sendData();
       recstat=checkReceived();
       if(recstat==RECOK || recstat==RECIGNORE) data_avail=false;
       else if(sendcnt>5) {
         data_avail=false;
-      }      
+      }
+      
+      LoRa.sleep();
+      LoRa.end();
+ 
     }
     
 //    delay(8000);
     
-  LowPower.idle(SLEEP_8S, ADC_OFF, 
+    LowPower.idle(SLEEP_8S, ADC_OFF, 
                   TIMER4_OFF, TIMER3_OFF, 
                   TIMER1_OFF, TIMER0_OFF, 
                   SPI_OFF, USART1_OFF, 
