@@ -426,6 +426,7 @@ void getData() {
     }
     
     firstchar=true;
+    bitstream=false;
     while (LoRa.available()) {
       dd=LoRa.read();
       if(firstchar && dd==0x00) { // bitstream mark
@@ -466,7 +467,6 @@ void getData() {
     Serial.println(nodeid);
     Serial.println(data);
     data_avail=true;
-    bitstream=false;
   }
 }
 
