@@ -18,11 +18,10 @@
 #define DEVSSID "geohub"
 #define DEVPWD "p4ssw0rd"
 
-unsigned long tref=0; // millisecs after the last report
-unsigned long timeref=0; // timestamp updated by server
 int lightCnt=0;
 int sigcnt=0;
-long timethreshold=60000;
+long heartbeat=60000;
+long beat=0;
 unsigned long band=921000000;
 int syncword=0x12;
 
@@ -36,16 +35,24 @@ String password="";
 float lat=-6.93;
 float lon=107.77;
 String dataserv="https://dock.unpad.ac.id/api/commit.php";
+String beatserv="https://dock.unpad.ac.id/api/beat.php";
 String host = "geohub";
 String apikey = "aggr-91f5b491/70571dece572c1f7";
-String devid = "ZQAMNR3Q384XYLNW";
+String devid =   "BBQM93Q384XY16RT";
 //String devid = "48ACKHE37UL6KKYO";
 String data="empty";
 
 uint16_t nodeid=0;
-uint16_t nodecm=0;
-String   cmdstr;
-uint8_t  runcmd=0;
+
+struct {
+  int id; // which node. zero=no commands
+  int num; // howmany time this command should be executed
+  String str; // the command
+} nodecmd;
+
+//uint16_t nodecm=0;
+//String   cmdstr;
+//uint8_t  runcmd=0;
 
 ESP8266WebServer server(80);
 WiFiClientSecure client;
@@ -164,19 +171,26 @@ void handleDump() {
  */
 
 void handleSet() {
+  String resp;
+  nodecmd.id=0;
+  
   for (uint8_t i=0; i<server.args();i++) {
-    if(server.argName(i)=="node") nodecm=server.arg(i).toInt();
-    else if(server.argName(i)=="cmd") cmdstr+=server.arg(i);
-    else if(server.argName(i)=="par") cmdstr+=" "+server.arg(i);
-    else if(server.argName(i)=="run") runcmd=server.arg(i).toInt();
+    if(server.argName(i)=="node") nodecmd.id=server.arg(i).toInt();
+    else if(server.argName(i)=="cmd") nodecmd.str=server.arg(i);
+    else if(server.argName(i)=="par") nodecmd.str+=" "+server.arg(i);
+    else if(server.argName(i)=="run") nodecmd.num=server.arg(i).toInt();
     else if(server.argName(i)=="append") {
       if((server.arg(i)=="yes") or (server.arg(i)=="1")) append_data=true;
       else append_data=false;
+      resp+="append: "+String(append_data)+"\n";
     }
   }
+
+  if(nodecmd.id) {
+    resp="set command for ";
+    resp+=String(nodecmd.id)+": "+nodecmd.str;
+  }
   
-  String resp="set command for ";
-  resp+=String(nodecm)+": "+cmdstr;
   server.send(200,"text/plain", resp); 
 }
 
@@ -448,12 +462,14 @@ void getData() {
     else data+=",rssi:";
     data+=String(LoRa.packetRssi());
 
-    if(nodeid==nodecm) {
-      sendLoRa(nodeid, cmdstr);
-      runcmd--;
-      if (runcmd<1) nodecm=0;
-    } else {
-      sendLoRa(nodeid,"ok");
+    if(nodecmd.id) {
+      if(nodeid==nodecmd.id) {
+        sendLoRa(nodeid, nodecmd.str);
+        nodecmd.num--;
+        if (nodecmd.num<1) nodecmd.id=0;
+      } else {
+        sendLoRa(nodeid,"ok");
+      }
     }
     
     char fmode[]="w";
@@ -470,10 +486,9 @@ void getData() {
   }
 }
 
-void sendData() {
+void sendData() {  
   String srvreq="key="+apikey+"&dev="+devid+"&node="+String(nodeid);
   srvreq+="&pos="+String(lon)+","+String(lat)+"&data="+data;
-  
   Serial.println(srvreq);
   HTTPClient http;
   if(http.begin(client, dataserv)) {
@@ -482,6 +497,54 @@ void sendData() {
     
     if (respnum==HTTP_CODE_OK || respnum==HTTP_CODE_MOVED_PERMANENTLY) {
       Serial.println(http.getString());
+    } else {
+      Serial.println("request failure");
+    }
+  }
+  http.end();
+}
+
+/* 
+ * send heartbeat and fetch command
+ * request: key=key&dev=devid&beat=timestamp
+ * server respond: commands
+ *   
+*/
+
+void sendBeat() { 
+  String srvreq="key="+apikey+"&dev="+devid+"&beat="+String(beat);
+  HTTPClient http;
+  if(http.begin(client, beatserv)) {
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    int respnum = http.POST(srvreq);
+      
+    if (respnum==HTTP_CODE_OK || respnum==HTTP_CODE_MOVED_PERMANENTLY) {
+      // parse server respond
+      String cmdline=http.getString();
+      // Serial.println(cmd);
+
+      while (cmdline!="") {
+        String cmd;
+        int en=cmdline.indexOf('\n');
+        
+        if(en<0){
+          cmd=cmdline;
+          cmdline=""; 
+        } else {
+          cmd=cmdline.substring(0,en);
+          cmdline.remove(0,en+1);
+        }
+        
+        if(cmd.startsWith("restart")) ESP.restart();
+        if(cmd.startsWith("node")) {
+          // format: node 1234 cmdstring
+          cmd.remove(0,5);
+          nodecmd.id=cmd.substring(0,cmd.indexOf(" ")).toInt();
+          nodecmd.num=1;
+          nodecmd.str=cmd.substring(cmd.indexOf(" "));
+        }
+      }
+
     } else {
       Serial.println("request failure");
     }
@@ -500,7 +563,7 @@ void setup(void) {
   checkFactoryReset();
   setupWiFi();
   setupLoRa();
-  tref=millis();
+  beat=millis();
 }
 
 void loop(void) {
@@ -514,6 +577,13 @@ void loop(void) {
     }
   }
   getData();
+
+  // heartbeat
+  if(millis()>beat) {
+    sendBeat();
+    beat=millis()+heartbeat;
+  }
+  
   if (lightCnt>0) {lightCnt--; digitalWrite(LED, LOW);}
   else digitalWrite(LED,HIGH);
   if (not digitalRead(SW)) lightCnt=2000;

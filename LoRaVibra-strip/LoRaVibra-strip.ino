@@ -218,18 +218,26 @@ uint8_t checkReceived() {
   if (stat=="sleep") {
     DLY=spar.toInt();
     if(DLY==0) DLY=60;
-    return RECOK;
+    return RECIGNORE;
   }
   if (stat=="ping") {
     lifesign(20,500);
-    return RECOK;
+    return RECIGNORE;
   }
   
   return RECFAILED;
 }
 
 void sendData() {
-      
+
+  if (!LoRa.begin(BAND)) {
+    lifesign(100,100);
+    return;
+  }
+
+  LoRa.setTxPower(17,PABOOST);
+  LoRa.setSyncWord(0x12);
+
   // [bin][len][maxlo][maxhi][chk][rsv*4][data...]
 
   buff[0]=0x00;          // bitstream mark
@@ -248,7 +256,6 @@ void sendData() {
   LoRa.write(buff,8+NDATA/2);
   LoRa.endPacket();
 
-  lifesign(1,500);
   
 /*
 #ifdef DEBUG
@@ -258,6 +265,38 @@ void sendData() {
   }
 #endif;
 */
+
+  int recstat=checkReceived();
+
+  // resend only if recstat==RECFAILED or RECRETRY
+  if(recstat==RECOK || recstat==RECIGNORE) data_avail=false;
+  else if(sendcnt>5) data_avail=false;
+  
+  LoRa.sleep();
+  LoRa.end();
+  
+  // lifesign(1,500);
+  
+}
+
+int sendPing() {
+  if (!LoRa.begin(BAND)) {
+    lifesign(100,100);
+    return 0;
+  }
+  
+  LoRa.setTxPower(17,PABOOST);
+  LoRa.setSyncWord(0x12);
+  LoRa.beginPacket();
+  LoRa.print(devid);
+  LoRa.endPacket();
+
+  int retval=checkReceived();
+  
+  LoRa.sleep();
+  LoRa.end();
+  
+  return retval;
 }
 
 // ---- ARDUINO STANDARD ----
@@ -266,6 +305,7 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   lifesign(5,500);
   LoRa.setPins(SS,RST,DI0);
+  devid="<"+String(device_id)+"<";
 }
 
 /*
@@ -278,41 +318,26 @@ Strategy:
 
 void loop() {
   int recstat;
-  digitalWrite(LED_BUILTIN,HIGH);
-  acquireData();
-  digitalWrite(LED_BUILTIN,LOW);
 
-  for (imul=0;imul<DLY;imul++) {      
-    if(data_avail) {
+  if(sendPing()==RECOK) {
+  //  digitalWrite(LED_BUILTIN,HIGH);
+    acquireData();
+  //  digitalWrite(LED_BUILTIN,LOW);
+  }
 
-      if (!LoRa.begin(BAND)) {
-        while (1) lifesign(10,100);
-      } else {
-        LoRa.setTxPower(17,PABOOST);
-        LoRa.setSyncWord(0x12);
-      }
-      
+  for (imul=0;imul<DLY;imul++) {
+    
+    if(data_avail) { // in case data was not sent correctly... resend.
       sendcnt++;
       sendData();
-      recstat=checkReceived();
-      if(recstat==RECOK || recstat==RECIGNORE) data_avail=false;
-      else if(sendcnt>5) {
-        data_avail=false;
-      }
-      
-      LoRa.sleep();
-      LoRa.end();
- 
-    }
-    
+    } 
+
 //    delay(8000);
-    
     LowPower.idle(SLEEP_8S, ADC_OFF, 
                   TIMER4_OFF, TIMER3_OFF, 
                   TIMER1_OFF, TIMER0_OFF, 
                   SPI_OFF, USART1_OFF, 
                   TWI_OFF, USB_OFF); 
-
   }
   
   counter++;
