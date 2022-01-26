@@ -21,6 +21,8 @@
 int lightCnt=0;
 int sigcnt=0;
 long heartbeat=60000;
+long periodicreset=0;
+long nextreset;
 long beat=0;
 unsigned long band=921000000;
 int syncword=0x12;
@@ -62,6 +64,20 @@ static bool onConfig=true;
 bool data_avail=false;
 bool append_data=false;
 
+void writeConfig() {
+  File file=FileSystem->open("/config.txt","w");
+  file.print("name=");file.println(host);
+  file.print("devid=");file.println(devid);
+  file.print("ssid=");file.println(ssid);
+  file.print("password=");file.println(password);
+  file.print("server=");file.println(dataserv);
+  file.print("key=");file.println(apikey);
+  file.print("lat=");file.println(lat);
+  file.print("lon=");file.println(lon);
+  file.print("preset=");file.println(periodicreset);
+  file.close();
+}
+
 void handleConfig() {
   String uri = ESP8266WebServer::urlDecode(server.uri());
   Serial.println("configuration request");
@@ -87,19 +103,13 @@ void handleConfig() {
     else if(server.argName(i)=="key") apikey=server.arg(i);
     else if(server.argName(i)=="lat") lat=server.arg(i).toFloat();
     else if(server.argName(i)=="lon") lon=server.arg(i).toFloat();
+    else if(server.argName(i)=="preset") periodicreset=server.arg(i).toInt();
     else if(server.argName(i)=="rst") rst=server.arg(i).toInt();
   }
   
-  File file=FileSystem->open("/config.txt","w");
-  file.print("name=");file.println(host);
-  file.print("devid=");file.println(devid);
-  file.print("ssid=");file.println(ssid);
-  file.print("password=");file.println(password);
-  file.print("server=");file.println(dataserv);
-  file.print("key=");file.println(apikey);
-  file.print("lat=");file.println(lat);
-  file.print("lon=");file.println(lon);
-  file.close();
+  writeConfig();
+
+  if(periodicreset) nextreset=millis()+periodicreset;
   
   String json="{\"status\":true,\"msg\":\"configuration\"}";
   server.send(200, "application/json", json);
@@ -183,6 +193,15 @@ void handleSet() {
       if((server.arg(i)=="yes") or (server.arg(i)=="1")) append_data=true;
       else append_data=false;
       resp+="append: "+String(append_data)+"\n";
+    }
+    else if(server.argName(i)=="preset") {
+      periodicreset=server.arg(i).toInt();
+
+      if(periodicreset) {
+        writeConfig();
+        nextreset=millis()+periodicreset;
+      }
+
     }
   }
 
@@ -273,6 +292,7 @@ void setupFS() {
       else if (item == "key") apikey=value;
       else if (item == "lat") lat=value.toFloat();
       else if (item == "lon") lon=value.toFloat();
+      else if (item == "preset") periodicreset=value.toInt();
       else {
         Serial.print("invalid token: ");
         Serial.println(item+"="+value);
@@ -281,6 +301,8 @@ void setupFS() {
 
     file.close();
   }
+
+  if(periodicreset) nextreset=millis()+periodicreset;
 
   if (ssid == "" or password == "") onConfig=true;
   else onConfig = false;
@@ -567,22 +589,29 @@ void setup(void) {
 }
 
 void loop(void) {
+  
+  if(periodicreset) {
+    if(millis()>nextreset) ESP.restart();
+  }
+  
   if (onConfig) {
     server.handleClient();
     MDNS.update();
   } else {
+    
     if (data_avail) {
       lightCnt=500;
       sendData();
     }
+    // heartbeat
+    if(millis()>beat) {
+      sendBeat();
+      beat=millis()+heartbeat;
+    }
+    
   }
-  getData();
 
-  // heartbeat
-  if(millis()>beat) {
-    sendBeat();
-    beat=millis()+heartbeat;
-  }
+  getData();
   
   if (lightCnt>0) {lightCnt--; digitalWrite(LED, LOW);}
   else digitalWrite(LED,HIGH);
