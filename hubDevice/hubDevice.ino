@@ -172,7 +172,7 @@ void handleDump() {
     }
   }
 
-  server.send(200,"text/plain", txt);  
+  server.send(200,"text/plain", txt);
 }
 
 /*
